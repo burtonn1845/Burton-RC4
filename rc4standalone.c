@@ -1,3 +1,4 @@
+#include <openssl/rand.h>
 #include <openssl/evp.h>
 /*#include "rc4.h"
 #include "rc4_enc.c"
@@ -30,8 +31,10 @@ void main(int argc, char *argv[])
     const EVP_MD *digest = EVP_sha256();
     int infd,outfd,bytesRead,bytesWritten,keyBytes,evpBytesRead;
     unsigned char buf[4096];
+    unsigned char sBuf[8];
     const char magic[] = "Salted__";
     const char salt[] = "12345678";
+    unsigned char salt2[8];
     bool eof=false;
     unsigned char hexkey[EVP_MAX_KEY_LENGTH];
     unsigned char iv[EVP_MAX_IV_LENGTH];
@@ -48,7 +51,7 @@ void main(int argc, char *argv[])
     int tool;
     int pwLength = strlen(pw);
     printf("entered pw : %s\tlength : %d\n",pw,pwLength);
-   	
+   	RAND_bytes(salt2,sizeof(salt2));
 	//check for encrypt or decrypt
 	if(strcmp(argv[4],"e") == 0)
 	{
@@ -71,13 +74,38 @@ void main(int argc, char *argv[])
 	{
 		printf("outfile creation failed.\n");
 		return;
-	}
-	//use password to create a key
-	if((keyBytes=EVP_BytesToKey(type, digest, salt,pw,pwLength,1,hexkey,NULL)) == 0)
-	{
-		printf("EVP_BytesToKey has failed.\n");
-		return;
-	}
+	}  
+
+    	//write salt and header information to out file if encrypting
+	if(tool == 1){  	
+	write(outfd,magic,8);
+	write(outfd,salt2,8);//salt2
+    	//use password to create a key
+	    if((keyBytes=EVP_BytesToKey(type, digest, salt2,pw,pwLength,1,hexkey,NULL)) == 0)//salt2
+	    {
+		    printf("EVP_BytesToKey has failed.\n");
+		    return;
+	    }
+	}//seek past header and salt information if decrypting
+	else if(tool == 0){
+	//lseek(infd,16,SEEK_SET);
+        lseek(infd,8,SEEK_SET);
+
+        if((read(infd,sBuf,8)) == -1)
+        {
+            printf("Failed to read salt from encrypted file.");
+        }
+        printf("Salt from encrypted file: %s\n",sBuf);
+    	//use password to create a key
+	    if((keyBytes=EVP_BytesToKey(type, digest, (const unsigned char*)sBuf,pw,pwLength,1,hexkey,NULL)) == 0)
+	    {
+		    printf("EVP_BytesToKey has failed.\n");
+		    return;
+	    }     
+	
+    }
+
+
 	//print key
 	printf("keyBytes: %d\n",keyBytes);
 	 if (keyBytes > 0) {
@@ -92,15 +120,6 @@ void main(int argc, char *argv[])
    	EVP_CipherInit_ex(ctx,EVP_rc4(),NULL,hexkey,NULL,tool);
 	
   	printf("Preparing to read bytes...\n");
-	
-	//write salt and header information to out file if encrypting
-	if(tool == 1){  	
-	write(outfd,magic,8);
-	write(outfd,salt,8);
-	}//seek past header and salt information if decrypting
-	else if(tool == 0){
-	lseek(infd,16,SEEK_SET);
-	}
 	
 	//loop while not at eof
 	while(eof == false){
